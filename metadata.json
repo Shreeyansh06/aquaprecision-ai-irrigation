@@ -1,0 +1,5 @@
+{
+  "name": "AquaPrecision: AI Irrigation Simulator",
+  "description": "A real-world OpenEnv simulation environment for AI agents to manage precision irrigation in drought-prone regions, optimizing crop health and water efficiency.",
+  "requestFramePermissions": []
+}

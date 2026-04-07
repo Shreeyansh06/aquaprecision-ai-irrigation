@@ -1,0 +1,124 @@
+name: AquaPrecision
+version: 1.0.0
+description: >
+  Precision irrigation simulation for AI agents managing drought-prone crop
+  fields. Agents must balance crop health against limited water resources
+  across varying weather conditions.
+entry_point: server.ts
+specification: OpenEnv v1.0
+
+tasks:
+  - id: task_easy_1
+    name: Survival Basics
+    description: >
+      Maintain a single crop cell for 10 steps. Water is plentiful and weather
+      is stable. Learn the basic irrigate/wait loop.
+    difficulty: easy
+    max_steps: 10
+
+  - id: task_medium_1
+    name: Field Management
+    description: >
+      Manage a 3x3 grid for 20 steps with moderate weather volatility.
+      Prioritise which cells to irrigate with a limited water budget.
+    difficulty: medium
+    max_steps: 20
+
+  - id: task_hard_1
+    name: Drought Crisis
+    description: >
+      A 5x5 grid under extreme heat with very limited water (150 L for 25 cells,
+      50 steps). Weather is highly volatile. Survival requires precise triage.
+    difficulty: hard
+    max_steps: 50
+
+observation_space:
+  type: object
+  properties:
+    step:
+      type: integer
+      description: Current simulation step (0-indexed)
+    weather:
+      type: object
+      properties:
+        temperature:
+          type: number
+          description: Air temperature in degrees Celsius (15–45)
+        humidity:
+          type: number
+          description: Relative humidity percentage (10–90)
+        is_raining:
+          type: boolean
+          description: Whether it is currently raining (+0.05 moisture bonus per cell)
+        evaporation_rate:
+          type: number
+          description: Base moisture loss per step before task multiplier
+    field:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: integer
+          moisture:
+            type: number
+            description: Soil moisture level (0.0–1.0)
+          crop_health:
+            type: number
+            description: Crop health level (0.0–1.0); 0.0 means dead
+          crop_type:
+            type: string
+          is_dead:
+            type: boolean
+    water_tank:
+      type: object
+      properties:
+        current:
+          type: number
+          description: Remaining water in litres
+        capacity:
+          type: number
+          description: Initial/maximum tank capacity in litres
+
+action_space:
+  type: object
+  oneOf:
+    - description: Apply water to a specific field cell
+      properties:
+        type:
+          const: irrigate
+        cell_id:
+          type: integer
+          description: Index of the target cell (must be alive)
+        amount:
+          type: number
+          minimum: 0
+          maximum: 10
+          description: Litres of water to apply
+      required: [type, cell_id, amount]
+    - description: Do nothing for this step
+      properties:
+        type:
+          const: wait
+      required: [type]
+
+reward:
+  description: >
+    reward = (avg_health × 10) − (water_used × 0.5) − (deaths_this_step × 50)
+  components:
+    health_bonus:
+      formula: avg_alive_crop_health * 10
+    water_penalty:
+      formula: water_used_this_step * 0.5
+    death_penalty:
+      formula: crops_died_this_step * 50
+
+grading:
+  description: >
+    Final score in [0.0, 1.0] calculated after the episode ends.
+  formula: >
+    (survival_rate * 0.6) + (avg_health * 0.3) + (water_efficiency * 0.1)
+  components:
+    survival_rate: alive_crops / total_crops
+    avg_health: mean crop_health across all cells
+    water_efficiency: water_remaining / initial_water
