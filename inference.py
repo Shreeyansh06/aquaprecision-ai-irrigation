@@ -38,21 +38,14 @@ SEED = "openenv_inference_seed_42"
 # ---------------------------------------------------------------------------
 
 def clamp_score(value) -> float:
-    """
-    Ensure score is STRICTLY between 0 and 1.
-    Never returns 0.0, 0, 1.0, or 1 — always in range (0.02, 0.98).
-    """
     try:
-        v = float(value)
-        if v != v:  # NaN check
+        v = float(value)  # ✅ force pure Python float
+        if v != v:
             v = 0.5
     except (TypeError, ValueError):
         v = 0.5
-
-    # Hard clamp — never 0 or 1
-    v = max(0.02, min(0.95, v))
-    return round(v, 4)
-
+    v = max(0.001, min(0.999, v))  # ✅ use 0.001 and 0.999
+    return float(round(v, 4))  # ✅ pure float
 
 # ---------------------------------------------------------------------------
 # Structured logging helpers
@@ -88,15 +81,18 @@ def log_step(step: int, action: dict, reward: float, done: bool, obs: dict) -> N
 
 
 def log_end(task_id: str, score: float, total_steps: int, total_reward: float) -> None:
-    score = 0.5  # hardcoded safe value
+    # ✅ Force pure Python float — not string, not numpy
+    score = float(clamp_score(score))
+    # ✅ Extra boundary check
+    if score == 0 or score == 1:
+        score = 0.999 if score == 1 else 0.001
     payload = {
         "task_id": task_id,
-        "score": score,
-        "total_steps": total_steps,
-        "total_reward": round(float(total_reward), 4),
+        "score": score,  # ✅ pure float
+        "total_steps": int(total_steps),  # ✅ pure int
+        "total_reward": float(round(total_reward, 4)),  # ✅ pure float
     }
     print(f"[END] {json.dumps(payload)}", flush=True)
-
 
 
 # ---------------------------------------------------------------------------
