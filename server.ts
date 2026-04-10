@@ -196,10 +196,12 @@ async function startServer() {
       const validatedAction = ActionSchema.parse(action);
       const result = session.env.step(validatedAction);
       // ✅ clamp reward from environment too
-      if (result.reward !== undefined) {
-        result.reward = clamp(result.reward);
-        result.score = result.reward;
-      }
+      const clampedReward = result.reward !== undefined ? clamp(result.reward) : 0.5;
+res.json({
+  ...result,
+  reward: clampedReward,
+  score: clampedReward,
+});
       res.json(result);
     } catch (err) {
       res.status(400).json({ error: "Invalid action", details: err });
