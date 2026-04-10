@@ -50,7 +50,7 @@ def clamp_score(value) -> float:
         v = 0.5
 
     # Hard clamp — never 0 or 1
-    v = max(0.02, min(0.98, v))
+    v = max(0.02, min(0.95, v))
     return round(v, 4)
 
 
