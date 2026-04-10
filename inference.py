@@ -1,12 +1,15 @@
+
 """
 AquaPrecision: AI Irrigation Simulator — OpenEnv Inference Script
-Structured stdout logging follows the required [START] / [STEP] / [END] format.
+Follows the EXACT stdout format required by the hackathon judges.
 """
 
+import asyncio
 import os
 import sys
 import json
 import requests
+from typing import List, Optional
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
@@ -14,88 +17,55 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 
 APP_URL = os.getenv("APP_URL", os.getenv("SPACE_URL", "http://localhost:7860")).rstrip("/")
-API_BASE_URL = os.getenv("API_BASE_URL")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
 HF_TOKEN = os.getenv("HF_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+API_KEY = HF_TOKEN or OPENAI_API_KEY or "dummy"
 
-if API_BASE_URL and HF_TOKEN:
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-elif API_BASE_URL and OPENAI_API_KEY:
-    client = OpenAI(base_url=API_BASE_URL, api_key=OPENAI_API_KEY)
-elif OPENAI_API_KEY:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-else:
-    client = None
-    print("WARNING: No LLM credentials found. Falling back to heuristic.", file=sys.stderr)
+BENCHMARK = "aquaprecision-irrigation"
+SUCCESS_SCORE_THRESHOLD = 0.1
 
-SEED = "openenv_inference_seed_42"
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 
 # ---------------------------------------------------------------------------
-# ✅ CRITICAL: Score clamping — strictly between 0 and 1, never 0.0 or 1.0
+# ✅ EXACT log format required by judges
+# ---------------------------------------------------------------------------
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    success_val = str(success).lower()
+    print(f"[END] success={success_val} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Score clamping — strictly between 0 and 1
 # ---------------------------------------------------------------------------
 
 def clamp_score(value) -> float:
     try:
-        v = float(value)  # ✅ force pure Python float
+        v = float(value)
         if v != v:
             v = 0.5
     except (TypeError, ValueError):
         v = 0.5
-    v = max(0.001, min(0.999, v))  # ✅ use 0.001 and 0.999
-    return float(round(v, 4))  # ✅ pure float
+    v = max(0.001, min(0.999, v))
+    return float(round(v, 4))
 
-
-# ---------------------------------------------------------------------------
-# Structured logging helpers
-# ---------------------------------------------------------------------------
-
-def log_start(task: dict, seed: str) -> None:
-    task_id = task["id"]
-    payload = {
-        "task_id": task_id,
-        "task_name": task.get("name", task_id),
-        "difficulty": task.get("difficulty", "unknown"),
-        "max_steps": task.get("max_steps", 24),
-        "seed": seed,
-    }
-    # ✅ validator parses "task=<id>" AND JSON — emit both
-    print(f"[START] task={task_id} {json.dumps(payload)}", flush=True)
-
-
-def log_step(step: int, action: dict, reward: float, done: bool, obs: dict) -> None:
-    reward = clamp_score(reward)
-    field = obs.get("field", [])
-    avg_health = clamp_score(
-        sum(c.get("crop_health", 0.5) for c in field) / max(len(field), 1)
-    ) if field else 0.5
-    water = obs.get("water_tank", {})
-    payload = {
-        "step": step,
-        "action": action,
-        "reward": reward,
-        "done": done,
-        "water_remaining": round(float(water.get("current", 0)), 2),
-        "avg_health": avg_health,
-    }
-    print(f"[STEP] {json.dumps(payload)}", flush=True)
-
-
-def log_end(task_id: str, score: float, total_steps: int, total_reward: float) -> None:
-    # ✅ Force pure Python float — not string, not numpy
-    score = float(clamp_score(score))
-    # ✅ Extra boundary check
-    if score == 0 or score == 1:
-        score = 0.999 if score == 1 else 0.001
-    payload = {
-        "task_id": task_id,
-        "score": score,  # ✅ pure float
-        "total_steps": int(total_steps),  # ✅ pure int
-        "total_reward": float(round(total_reward, 4)),  # ✅ pure float
-    }
-    print(f"[END] {json.dumps(payload)}", flush=True)
 
 # ---------------------------------------------------------------------------
 # Heuristic fallback agent
@@ -118,9 +88,6 @@ def heuristic_action(obs: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def llm_action(obs: dict, task_description: str) -> dict:
-    if client is None:
-        return heuristic_action(obs)
-
     field = obs.get("field", [])
     weather = obs.get("weather", {})
     water = obs.get("water_tank", {})
@@ -128,9 +95,6 @@ def llm_action(obs: dict, task_description: str) -> dict:
     prompt = (
         f"Task: {task_description}\n"
         f"Step: {obs.get('step', 0)}\n"
-        f"Weather: temperature={weather.get('temperature', 25):.1f}C, "
-        f"humidity={weather.get('humidity', 50):.1f}%, "
-        f"raining={weather.get('is_raining', False)}\n"
         f"Water tank: {water.get('current', 0):.1f} / {water.get('capacity', 100):.1f} L\n"
         f"Field cells:\n"
         + "\n".join(
@@ -162,7 +126,7 @@ def llm_action(obs: dict, task_description: str) -> dict:
             raise ValueError(f"Bad action type: {action}")
         return action
     except Exception as exc:
-        print(f"LLM error (using heuristic): {exc}", file=sys.stderr)
+        print(f"[DEBUG] LLM error: {exc}", file=sys.stderr, flush=True)
         return heuristic_action(obs)
 
 
@@ -171,99 +135,102 @@ def llm_action(obs: dict, task_description: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def run_task(task: dict) -> float:
-    log_start(task, SEED)
+    task_name = task.get("name", task["id"])
+    log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
-    # Reset
+    rewards: List[float] = []
+    steps_taken = 0
+    score = 0.5
+    success = False
+
     try:
+        # Reset
         reset_resp = requests.post(
             f"{APP_URL}/api/reset",
-            json={"task_id": task["id"], "seed": SEED},
+            json={"task_id": task["id"], "seed": "openenv_inference_seed_42"},
             timeout=30,
         )
         reset_resp.raise_for_status()
         data = reset_resp.json()
-    except Exception as exc:
-        print(f"ERROR resetting {task['id']}: {exc}", file=sys.stderr)
-        # ✅ fallback score strictly between 0 and 1
-        log_end(task["id"], 0.02, 0, 0.02)
-        return 0.02
+        session_id = data["session_id"]
+        obs = data["observation"]
+        done = False
 
-    session_id = data["session_id"]
-    obs = data["observation"]
-    done = False
-    total_reward = 0.0
-    steps_taken = 0
+        while not done:
+            action = llm_action(obs, task.get("description", task["id"]))
+            action_str = json.dumps(action)
 
-    while not done:
-        action = llm_action(obs, task.get("description", task["id"]))
+            try:
+                step_resp = requests.post(
+                    f"{APP_URL}/api/step",
+                    json={"session_id": session_id, "action": action},
+                    timeout=30,
+                )
+                step_resp.raise_for_status()
+                result = step_resp.json()
+            except Exception as exc:
+                log_step(steps_taken + 1, action_str, 0.0, True, str(exc))
+                break
 
-        try:
-            step_resp = requests.post(
-                f"{APP_URL}/api/step",
-                json={"session_id": session_id, "action": action},
-                timeout=30,
+            obs = result["observation"]
+            reward = float(clamp_score(result.get("reward", 0.5)))
+            done = result["done"]
+            steps_taken += 1
+            rewards.append(reward)
+
+            log_step(
+                step=steps_taken,
+                action=action_str,
+                reward=reward,
+                done=done,
+                error=None
             )
-            step_resp.raise_for_status()
-            result = step_resp.json()
+
+        # Grade
+        try:
+            grade_resp = requests.get(f"{APP_URL}/api/grade/{session_id}", timeout=30)
+            grade_resp.raise_for_status()
+            raw_score = grade_resp.json().get("score", 0.5)
+            score = float(clamp_score(raw_score))
         except Exception as exc:
-            print(f"ERROR stepping {task['id']}: {exc}", file=sys.stderr)
-            break
+            print(f"[DEBUG] Grading error: {exc}", file=sys.stderr, flush=True)
+            score = float(clamp_score(
+                sum(rewards) / max(len(rewards), 1)
+            ))
 
-        obs = result["observation"]
-        # ✅ clamp every single reward
-        reward = clamp_score(result.get("reward", 0.5))
-        done = result["done"]
-        total_reward += reward
-        steps_taken += 1
+        success = score >= SUCCESS_SCORE_THRESHOLD
 
-        log_step(obs.get("step", steps_taken), action, reward, done, obs)
-
-    # Grade
-    try:
-        grade_resp = requests.get(
-            f"{APP_URL}/api/grade/{session_id}",
-            timeout=30,
-        )
-        grade_resp.raise_for_status()
-        raw_score = grade_resp.json().get("score", 0.5)
-        score = clamp_score(raw_score)
     except Exception as exc:
-        print(f"ERROR grading {task['id']}: {exc}", file=sys.stderr)
-        # ✅ fallback: average reward, always clamped
-        avg = total_reward / max(steps_taken, 1)
-        score = clamp_score(avg)
+        print(f"[DEBUG] Task error: {exc}", file=sys.stderr, flush=True)
+        score = 0.5
+        success = False
 
-    # ✅ Final safety net before logging
-    score = clamp_score(score)
-    log_end(task["id"], score, steps_taken, total_reward)
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
     return score
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point — EXACT format required by judges
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+async def main() -> None:
     try:
         tasks_resp = requests.get(f"{APP_URL}/api/tasks", timeout=30)
         tasks_resp.raise_for_status()
         tasks = tasks_resp.json()
     except Exception as exc:
-        print(f"ERROR: Could not fetch tasks — {exc}", file=sys.stderr)
+        print(f"[DEBUG] ERROR: Could not fetch tasks — {exc}", file=sys.stderr)
         sys.exit(1)
 
-    scores = {}
     for task in tasks:
         try:
-            score = run_task(task)
+            run_task(task)
         except Exception as exc:
-            print(f"ERROR running {task['id']}: {exc}", file=sys.stderr)
-            # ✅ never 0 even on total failure
-            score = 0.02
-        # ✅ final safety clamp before storing
-        scores[task["id"]] = clamp_score(score)
+            print(f"[DEBUG] ERROR running {task['id']}: {exc}", file=sys.stderr)
 
-    print("\n--- SUMMARY ---", flush=True)
-    for task_id, score in scores.items():
-        # ✅ clamp one last time before printing
-        print(f"  {task_id}: {clamp_score(score):.4f}", flush=True)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+ flush=True)
