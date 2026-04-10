@@ -45,7 +45,7 @@ export const TASKS: Task[] = [
 // ✅ Strictly between 0 and 1 — never 0.0 or 1.0
 function clamp(value: number): number {
   const v = isNaN(value) || !isFinite(value) ? 0.5 : value;
-  return parseFloat(Math.min(0.98, Math.max(0.02, v)).toFixed(4));
+  return parseFloat(Math.min(0.95, Math.max(0.02, v)).toFixed(4));
 }
 
 export function gradeTask(state: State, task: Task): number {
