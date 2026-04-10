@@ -24,7 +24,7 @@ export class IrrigationEnv {
       field.push({
         id: i,
         moisture: clamp(0.5 + this.rng() * 0.2),
-        crop_health: 0.95,
+        crop_health: 0.85,
         crop_type: 'Wheat',
         is_dead: false,
       });
