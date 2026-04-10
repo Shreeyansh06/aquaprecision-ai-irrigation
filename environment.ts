@@ -2,7 +2,7 @@ import seedrandom from 'seedrandom';
 import { Action, Observation, StepResult, State, FieldCell, Weather, Task } from './types';
 
 // ✅ Strictly between 0 and 1 — never 0.0 or 1.0
-function clamp(value: number, min = 0.02, max = 0.98): number {
+function clamp(value: number, min = 0.02, max = 0.95): number {
   const v = isNaN(value) || !isFinite(value) ? 0.5 : value;
   return parseFloat(Math.min(max, Math.max(min, v)).toFixed(4));
 }
