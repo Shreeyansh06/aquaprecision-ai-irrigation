@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "aquaprecision-ai-irrigation"
+version = "1.0.0"
+description = "Drought-Resilient Crop Watering OpenEnv - Smart Irrigation AI"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core>=0.2.0",
+    "openai>=1.0.0",
+    "requests>=2.28.0",
+]
+
+[project.scripts]
+server = "server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aquaprecision_ai_irrigation*"]
+
+[tool.openenv]
+name = "AquaPrecision AI Irrigation Simulator"
+version = "1.0.0"
+description = "AI-driven precision irrigation system for drought-prone regions"
+author = "Shreeyansh Jagdale"
+tasks = ["easy", "medium", "hard"]
